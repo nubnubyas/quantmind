@@ -1,0 +1,41 @@
+# Environment / secrets
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Data (large files)
+data/sample_papers/
+
+# Qdrant local storage
+qdrant_storage/
+
+# SQLite auxiliary files
+*.sqlite-wal
+*.sqlite-journal
+*.sqlite-shm
+
+# LangGraph checkpoints (local dev)
+*.db
+*.sqlite
+checkpoints/
+
+# Internal AI coordination docs (not for public repository)
+memory/
+context/
+templates/
+quant-research-agent-proposal.md
+
+# IDE
+.DS_Store
+.idea/
+.vscode/

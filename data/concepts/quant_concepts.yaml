@@ -1,0 +1,119 @@
+- term: Sharpe Ratio
+  definition: Risk-adjusted return metric computed as excess return divided by return volatility; higher values indicate better return per unit of risk.
+  category: risk_metrics
+
+- term: Momentum
+  definition: Investment strategy that buys assets with strong recent performance and sells recent losers, exploiting short-to-medium-term return persistence.
+  category: factor_investing
+
+- term: Fama-French Three-Factor Model
+  definition: Asset pricing model extending CAPM with SMB (size) and HML (value) factors alongside market excess return to explain cross-sectional stock returns.
+  category: factor_models
+
+- term: SMB Factor
+  definition: Small Minus Big factor capturing the historical premium of small-cap stocks over large-cap stocks in the Fama-French framework.
+  category: factor_models
+
+- term: HML Factor
+  definition: High Minus Low factor representing the value premium from buying high book-to-market stocks and selling low book-to-market stocks.
+  category: factor_models
+
+- term: CAPM
+  definition: Capital Asset Pricing Model relating expected return to systematic risk beta relative to the market portfolio under mean-variance optimization.
+  category: factor_models
+
+- term: Value at Risk (VaR)
+  definition: Maximum expected loss over a given horizon at a specified confidence level under normal or historical return assumptions.
+  category: risk_metrics
+
+- term: Kelly Criterion
+  definition: Optimal bet sizing rule that maximizes long-run logarithmic wealth growth based on edge and odds, widely used in position sizing.
+  category: portfolio_theory
+
+- term: Pairs Trading
+  definition: Market-neutral strategy trading the spread between two historically correlated securities when the spread deviates from its mean.
+  category: strategies
+
+- term: Cointegration
+  definition: Statistical property where a linear combination of non-stationary time series is stationary, forming the basis for pairs trading and stat arb.
+  category: econometrics
+
+- term: Statistical Arbitrage
+  definition: Quantitative strategy exploiting mean-reverting relationships among securities using statistical models, often market-neutral.
+  category: strategies
+
+- term: Backtrader
+  definition: Python event-driven backtesting framework supporting strategy simulation, indicators, brokers, and analyzers for systematic trading research.
+  category: tools
+
+- term: Information Ratio
+  definition: Active return divided by tracking error relative to a benchmark, measuring risk-adjusted skill of active management.
+  category: risk_metrics
+
+- term: Maximum Drawdown
+  definition: Largest peak-to-trough decline in portfolio value, a key tail-risk metric for strategy evaluation.
+  category: risk_metrics
+
+- term: Alpha
+  definition: Excess return of a portfolio relative to a benchmark after adjusting for systematic risk exposures (beta and factors).
+  category: performance
+
+- term: Beta
+  definition: Sensitivity of an asset or portfolio return to movements in the market portfolio or a specified factor.
+  category: factor_models
+
+- term: Sortino Ratio
+  definition: Risk-adjusted return using downside deviation instead of total volatility, penalizing only harmful volatility.
+  category: risk_metrics
+
+- term: Mean Reversion
+  definition: Hypothesis that prices or spreads revert toward a long-run mean, underpinning contrarian and pairs-trading strategies.
+  category: strategies
+
+- term: Volatility Targeting
+  definition: Position sizing approach that scales exposure inversely to realized or forecast volatility to maintain stable portfolio risk.
+  category: risk_management
+
+- term: Factor Investing
+  definition: Systematic approach harvesting compensated risk premia such as value, momentum, size, quality, and low volatility.
+  category: factor_investing
+
+- term: Smart Beta
+  definition: Rules-based indexing that tilts toward factor exposures while retaining transparency and lower cost versus active management.
+  category: factor_investing
+
+- term: Carhart Four-Factor Model
+  definition: Extension of Fama-French adding a momentum (UMD) factor to explain persistence in mutual fund and stock returns.
+  category: factor_models
+
+- term: UMD Factor
+  definition: Up Minus Down momentum factor from winners minus losers portfolios over a formation period, typically 12 months.
+  category: factor_models
+
+- term: GARCH
+  definition: Generalized Autoregressive Conditional Heteroskedasticity model for time-varying volatility clustering in financial returns.
+  category: econometrics
+
+- term: Kalman Filter
+  definition: Recursive state-space estimator used in quant finance for dynamic beta estimation, pairs trading, and signal extraction.
+  category: econometrics
+
+- term: Order Book Imbalance
+  definition: Microstructure signal measuring buy versus sell pressure in the limit order book as a short-horizon price predictor.
+  category: market_microstructure
+
+- term: Slippage
+  definition: Difference between expected trade price and actual execution price due to market impact, latency, and liquidity constraints.
+  category: execution
+
+- term: Walk-Forward Analysis
+  definition: Backtesting methodology that repeatedly trains on in-sample windows and validates on subsequent out-of-sample periods.
+  category: backtesting
+
+- term: Overfitting
+  definition: Fitting a model too closely to historical noise, producing strong in-sample performance that fails out-of-sample.
+  category: backtesting
+
+- term: Risk Parity
+  definition: Portfolio construction allocating risk budget equally across assets or factors rather than capital weights.
+  category: portfolio_theory
