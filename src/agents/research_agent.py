@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
+from src.agents._utils import last_user_text
 from src.agents.state import (
     AgentState,
     Citation,
@@ -17,6 +17,7 @@ from src.agents.state import (
     VerificationResult,
 )
 from src.config.llm_client import LLMClient
+from src.tools.search_web import search_web
 from src.vector_store.types import RetrievalSpec, SearchResult, VectorStore
 
 CONFIDENCE_THRESHOLD = 0.5
@@ -41,25 +42,11 @@ class VerificationJudgeSchema(BaseModel):
     failure_reasons: list[str] = Field(default_factory=list)
 
 
-def _last_user_text(state: AgentState) -> str:
-    messages = state.get("messages") or []
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            return msg.content if isinstance(msg.content, str) else str(msg.content)
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            return str(msg.get("content", ""))
-        role = getattr(msg, "type", None) or getattr(msg, "role", None)
-        if role in ("human", "user"):
-            content = getattr(msg, "content", "")
-            return content if isinstance(content, str) else str(content)
-    return ""
-
-
 def _query_text(state: AgentState) -> str:
     intent = state.get("query_intent")
     if intent and intent.get("keywords"):
         return " ".join(intent["keywords"])
-    return _last_user_text(state)
+    return last_user_text(state)
 
 
 def _results_to_citations(results: list[SearchResult]) -> list[Citation]:
@@ -79,10 +66,31 @@ def _results_to_citations(results: list[SearchResult]) -> list[Citation]:
 def _format_sources(results: list[SearchResult]) -> str:
     blocks: list[str] = []
     for i, r in enumerate(results, 1):
+        source_type = f"source={r.source}" if r.source == "web" else f"paper_id={r.paper_id!r}"
         blocks.append(
-            f"[{i}] title={r.title!r} paper_id={r.paper_id!r} section={r.section!r}\n{r.text}"
+            f"[{i}] title={r.title!r} {source_type} section={r.section!r}\n{r.text}"
         )
     return "\n\n".join(blocks)
+
+
+def _web_to_search_results(web_data: list[dict]) -> list[SearchResult]:
+    """Convert DuckDuckGo web search results to the SearchResult format expected by
+    synthesize_answer and verify_answer nodes."""
+    return [
+        SearchResult(
+            text=item.get("snippet", ""),
+            fusion_score=0.5,
+            doc_id=f"web-{i}",
+            chunk_id=f"web-{i}",
+            source="web",
+            paper_id=None,
+            title=item.get("title"),
+            section=None,
+            year=None,
+            url=item.get("url"),
+        )
+        for i, item in enumerate(web_data)
+    ]
 
 
 def compile_research_subgraph(
@@ -95,7 +103,7 @@ def compile_research_subgraph(
     depth_expanded = False
 
     def parse_query(state: AgentState) -> dict:
-        user_text = _last_user_text(state)
+        user_text = last_user_text(state)
         raw = llm_client.chat_structured(
             [
                 {
@@ -124,19 +132,90 @@ def compile_research_subgraph(
         top_k = 10 if depth_expanded else 5
         prefetch_k = 40 if depth_expanded else 20
         spec = RetrievalSpec(mode="hybrid", top_k=top_k, prefetch_k=prefetch_k)
-        retrieved = vector_store.search(query, "papers", spec)
-        return {"retrieved": retrieved}
+        qdrant_results = vector_store.search(query, "papers", spec)
+
+        web_result = search_web(query, max_results=3)
+        web_results: list[SearchResult] = []
+        if web_result.ok:
+            web_data = web_result.data.get("results") or []
+            if web_data:
+                web_results = [
+                    SearchResult(
+                        text=item.get("snippet", ""),
+                        fusion_score=0.45,
+                        doc_id=f"web-{i}",
+                        chunk_id=f"web-{i}",
+                        source="web",
+                        paper_id=None,
+                        title=item.get("title"),
+                        section=None,
+                        year=None,
+                        url=item.get("url"),
+                    )
+                    for i, item in enumerate(web_data)
+                ]
+
+        merged: list[SearchResult] = []
+        web_idx = 0
+        for i, qr in enumerate(qdrant_results):
+            merged.append(qr)
+            if (i + 1) % 2 == 0 and web_idx < len(web_results):
+                merged.append(web_results[web_idx])
+                web_idx += 1
+        merged.extend(web_results[web_idx:])
+
+        # 降权 Alpha-GPT 综述 chunk（当查询不涉及 alpha mining 时）
+        query_lower = query.lower()
+        is_alpha_query = any(
+            kw in query_lower for kw in ["alpha", "gpt", "mining", "signal generation"]
+        )
+        if not is_alpha_query:
+            alpha_chunks = []
+            other_chunks = []
+            for r in merged:
+                title_lower = (r.title or "").lower()
+                text_lower = (r.text or "").lower()
+                if "alpha-gpt" in title_lower or "alpha-gpt" in text_lower[:300]:
+                    alpha_chunks.append(r)
+                else:
+                    other_chunks.append(r)
+            merged = other_chunks + alpha_chunks
+
+        return {"retrieved": merged}
 
     def check_confidence(state: AgentState) -> dict:
         retrieved = state.get("retrieved") or []
         confidence = retrieved[0].fusion_score if retrieved else 0.0
         return {"confidence": confidence}
 
-    def route_after_confidence(state: AgentState) -> Literal["graceful_decline", "decide_depth"]:
+    def route_after_confidence(state: AgentState) -> Literal["web_search", "decide_depth"]:
         confidence = state.get("confidence") or 0.0
         if confidence < CONFIDENCE_THRESHOLD:
-            return "graceful_decline"
+            return "web_search"
         return "decide_depth"
+
+    def web_search(state: AgentState) -> dict:
+        user_text = last_user_text(state)
+        result = search_web(user_text, max_results=5)
+        if result.ok:
+            web_data = result.data.get("results") or []
+            if web_data:
+                return {"retrieved": _web_to_search_results(web_data)}
+        return {"retrieved": []}
+
+    def check_web_results(state: AgentState) -> dict:
+        retrieved = state.get("retrieved") or []
+        if retrieved:
+            return {"confidence": 0.5}
+        return {}
+
+    def route_after_web(
+        state: AgentState,
+    ) -> Literal["synthesize_answer", "graceful_decline"]:
+        retrieved = state.get("retrieved") or []
+        if retrieved:
+            return "synthesize_answer"
+        return "graceful_decline"
 
     def decide_depth(state: AgentState) -> dict:
         return {}
@@ -162,7 +241,7 @@ def compile_research_subgraph(
         return {}
 
     def synthesize_answer(state: AgentState) -> dict:
-        user_text = _last_user_text(state)
+        user_text = last_user_text(state)
         retrieved = state.get("retrieved") or []
         sources = _format_sources(retrieved)
         result = llm_client.chat(
@@ -170,8 +249,19 @@ def compile_research_subgraph(
                 {
                     "role": "system",
                     "content": (
-                        "You are a quant research assistant. Answer using ONLY the provided sources. "
-                        "Cite sources inline as [1], [2], etc. State uncertainty when evidence is weak."
+                        "You are a quant research assistant. Answer the user's question "
+                        "using the provided sources.\n\n"
+                        "CRITICAL RULES:\n"
+                        "1. Use at least 2 DIFFERENT sources in your answer. "
+                        "Do not rely on a single source even if it looks comprehensive.\n"
+                        "2. Sources marked with 'source=web' are web search results — "
+                        "treat them as equally valid as paper sources.\n"
+                        "3. If sources disagree or cover different aspects, "
+                        "synthesize a balanced view.\n"
+                        "4. Cite sources inline as [1], [2], etc. "
+                        "State uncertainty when evidence is weak or thin.\n"
+                        "5. Answer the SPECIFIC question asked — do not summarize a paper "
+                        "unless it directly answers the question."
                     ),
                 },
                 {
@@ -186,7 +276,7 @@ def compile_research_subgraph(
         }
 
     def verify_answer(state: AgentState) -> dict:
-        user_text = _last_user_text(state)
+        user_text = last_user_text(state)
         draft = state.get("draft_answer") or ""
         retrieved = state.get("retrieved") or []
         sources = _format_sources(retrieved)
@@ -280,7 +370,7 @@ def compile_research_subgraph(
         }
 
     def graceful_decline(state: AgentState) -> dict:
-        user_text = _last_user_text(state)
+        user_text = last_user_text(state)
         intent = state.get("query_intent")
         result = llm_client.chat(
             [
@@ -313,6 +403,8 @@ def compile_research_subgraph(
     builder.add_node("parse_query", parse_query)
     builder.add_node("hybrid_search", hybrid_search)
     builder.add_node("check_confidence", check_confidence)
+    builder.add_node("web_search", web_search)
+    builder.add_node("check_web_results", check_web_results)
     builder.add_node("decide_depth", decide_depth)
     builder.add_node("fetch_more", fetch_more)
     builder.add_node("synthesize_answer", synthesize_answer)
@@ -325,6 +417,8 @@ def compile_research_subgraph(
     builder.add_edge("parse_query", "hybrid_search")
     builder.add_edge("hybrid_search", "check_confidence")
     builder.add_conditional_edges("check_confidence", route_after_confidence)
+    builder.add_edge("web_search", "check_web_results")
+    builder.add_conditional_edges("check_web_results", route_after_web)
     builder.add_conditional_edges("decide_depth", route_after_depth)
     builder.add_edge("fetch_more", "hybrid_search")
     builder.add_edge("synthesize_answer", "verify_answer")

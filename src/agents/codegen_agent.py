@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
+from src.agents._utils import last_user_text
 from src.agents.state import AgentState, SubgraphOutput
 from src.config.llm_client import LLMClient
 from src.sandbox.sandbox_runner import SandboxRunner
@@ -27,20 +27,6 @@ class StrategySpecSchema(BaseModel):
     signal_logic: str = Field(description="Signal logic description for code generation")
     asset_class: str | None = Field(default=None, description='"equity" / "futures" / null')
     timeframe: str | None = Field(default=None, description='"daily" / "hourly" / null')
-
-
-def _last_user_text(state: AgentState) -> str:
-    messages = state.get("messages") or []
-    for msg in reversed(messages):
-        if isinstance(msg, HumanMessage):
-            return msg.content if isinstance(msg.content, str) else str(msg.content)
-        if isinstance(msg, dict) and msg.get("role") == "user":
-            return str(msg.get("content", ""))
-        role = getattr(msg, "type", None) or getattr(msg, "role", None)
-        if role in ("human", "user"):
-            content = getattr(msg, "content", "")
-            return content if isinstance(content, str) else str(content)
-    return ""
 
 
 def _failure_detail(state: AgentState) -> str:
@@ -63,27 +49,57 @@ def compile_codegen_subgraph(
     runner = sandbox_runner or SandboxRunner()
 
     def parse_strategy(state: AgentState) -> dict:
-        user_text = _last_user_text(state)
+        user_text = last_user_text(state)
         raw = llm_client.chat_structured(
             [
                 {
                     "role": "system",
                     "content": (
-                        "Parse the user's trading strategy description into a structured spec. "
-                        "Infer framework (backtrader or vectorbt), parameters, signal logic, "
-                        "asset class, and timeframe when possible."
+                        "You are a trading strategy parser. Extract the strategy the user described "
+                        "into structured fields.\n\n"
+                        "FOUR EXAMPLES:\n"
+                        "1. User: '双均线20/60日交叉策略'\n"
+                        "   → name='Dual MA 20/60 Crossover', framework='backtrader', "
+                        "parameters={'ma_fast': 20, 'ma_slow': 60}, "
+                        "signal_logic='Buy when MA(20) crosses above MA(60). Sell when MA(20) "
+                        "crosses below MA(60). Use daily closing prices.'\n"
+                        "2. User: 'ATR-based stop loss with 2x ATR multiplier on daily SPY'\n"
+                        "   → name='ATR Stop Loss', framework='backtrader', "
+                        "parameters={'atr_period': 14, 'atr_multiplier': 2.0}, "
+                        "signal_logic='Calculate ATR(14). Exit when close crosses below "
+                        "entry_price - 2*ATR. Trail stop upward.'\n"
+                        "3. User: 'Buy and hold SPY with monthly rebalancing using vectorbt'\n"
+                        "   → name='Buy and Hold Monthly Rebalance', framework='vectorbt', "
+                        "parameters={'rebalance_freq': 'monthly'}, "
+                        "signal_logic='Buy 100% SPY at start. Rebalance monthly. No exit signals.'\n"
+                        "4. User: 'Walk-forward optimization for momentum with 36-month rolling window'\n"
+                        "   → name='Walk-Forward Momentum', framework='backtrader', "
+                        "parameters={'lookback': 12, 'rebalance_freq': 'monthly', 'rolling_window': 36}, "
+                        "signal_logic='Each month, train on prior 36 months, pick top quintile "
+                        "momentum stocks, hold 1 month. Walk forward each month.'\n\n"
+                        "RULES:\n"
+                        "1. PARSE WHAT THE USER SAID. Map their words exactly: "
+                        "'ATR' → ATR, 'vectorbt' → vectorbt, '20/60' → ma_fast=20 ma_slow=60, "
+                        "'walk-forward' → rolling window optimization. "
+                        "Every concrete strategy request must produce concrete parameters.\n"
+                        "2. Only output NEEDS_CLARIFICATION if the user's message contains NO "
+                        "recognizable trading strategy (e.g. 'help me get rich').\n"
+                        "3. Default framework to 'backtrader' only when none is mentioned.\n\n"
+                        "Fields: name, description, framework, parameters, signal_logic, "
+                        "asset_class (optional), timeframe (optional)."
                     ),
                 },
                 {"role": "user", "content": user_text},
             ],
             StrategySpecSchema,
+            model=llm_client.strong_model,
         )
         spec = {
-            "name": raw["name"],
+            "name": raw.get("name", "Unspecified"),
             "description": user_text,
             "framework": raw.get("framework", "backtrader"),
             "parameters": raw.get("parameters") or {},
-            "signal_logic": raw["signal_logic"],
+            "signal_logic": raw.get("signal_logic", ""),
             "asset_class": raw.get("asset_class"),
             "timeframe": raw.get("timeframe"),
         }
@@ -101,6 +117,7 @@ def compile_codegen_subgraph(
             framework=spec.get("framework", "backtrader"),
             asset_class=spec.get("asset_class"),
             timeframe=spec.get("timeframe"),
+            strategy_name=spec.get("name", ""),
             llm=llm_client,
         )
         code = result.data.get("code") if result.ok else None

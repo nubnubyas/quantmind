@@ -54,6 +54,13 @@ class SubgraphOutput(TypedDict):
     error: str | None
 
 
+def _merge_final_response(a: str | None, b: str | None) -> str | None:
+    """Merge parallel final_response writes: concat if both set, else first non-None."""
+    if a and b:
+        return f"{a}\n\n---\n\n{b}"
+    return a or b
+
+
 def _merge_named_outputs(
     a: dict[str, SubgraphOutput],
     b: dict[str, SubgraphOutput],
@@ -84,7 +91,7 @@ class AgentState(TypedDict):
     generated_code: Optional[str]
     sandbox_result: Optional[SandboxResult]
 
-    final_response: Optional[str]
+    final_response: Annotated[Optional[str], _merge_final_response]
     citations: Optional[list[Citation]]
 
     retry_counts: Annotated[dict[str, int], _merge_retry_counts]
@@ -99,6 +106,7 @@ __all__ = [
     "RouteDecision",
     "SubgraphOutput",
     "VerificationResult",
+    "_merge_final_response",
     "_merge_named_outputs",
     "_merge_retry_counts",
 ]

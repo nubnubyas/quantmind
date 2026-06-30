@@ -81,7 +81,7 @@ def mock_llm():
     llm.chat_structured.return_value = _strategy_spec_raw()
     llm.chat.return_value = LLMResult(
         text="import backtrader as bt\n\nclass MyStrategy(bt.Strategy):\n    pass\nprint('ok')",
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
         usage={"input_tokens": 10, "output_tokens": 50, "total_tokens": 60},
         latency_ms=500,
     )
@@ -214,3 +214,143 @@ def test_confirm_node_no_side_effects_before_interrupt(mock_llm, mock_sandbox, c
         graph.invoke(Command(resume={intr.id: intr.value}), config)
         assert "generate" in side_effect_calls
         assert "sandbox_run" in side_effect_calls
+
+
+def test_parse_strategy_dual_ma_not_rsi(mock_llm):
+    """parse_strategy must correctly parse dual-MA crossover, not default to RSI."""
+    mock_llm.chat_structured.return_value = {
+        "name": "Dual Moving Average Crossover",
+        "description": "20-day MA crosses above 60-day MA",
+        "framework": "backtrader",
+        "parameters": {"fast_period": 20, "slow_period": 60},
+        "signal_logic": "Buy when fast MA crosses above slow MA, sell when crosses below",
+        "asset_class": None,
+        "timeframe": None,
+    }
+    graph = compile_codegen_subgraph(mock_llm)
+    result = graph.invoke(
+        _initial_state("Build a dual moving average crossover: buy when 20-day MA crosses above 60-day MA")
+    )
+
+    interrupts = result.get("__interrupt__") or []
+    assert interrupts, "expected interrupt at confirm_with_user"
+    spec = interrupts[0].value
+
+    assert "RSI" not in spec.get("name", "")
+    assert "RSI" not in spec.get("signal_logic", "")
+    assert spec["parameters"].get("fast_period") == 20
+    assert spec["parameters"].get("slow_period") == 60
+    assert "MA" in spec.get("signal_logic", "") or "moving average" in spec.get("name", "").lower()
+
+    system_prompt = mock_llm.chat_structured.call_args[0][0][0]["content"]
+    assert "FOUR EXAMPLES" in system_prompt
+    assert "PARSE WHAT THE USER SAID" in system_prompt
+    assert "Walk-forward" in system_prompt
+
+
+def test_parse_strategy_atr_not_ma(requires_llm):
+    """parse_strategy should extract ATR stop loss, not default to MA crossover."""
+    from src.config.llm_client import LLMClient
+
+    client = LLMClient()
+    subgraph = compile_codegen_subgraph(client)
+
+    result = subgraph.invoke(
+        {
+            "messages": [HumanMessage(content="ATR-based stop loss with 2x multiplier")],
+            "user_id": "test_user",
+        }
+    )
+    interrupts = result.get("__interrupt__") or []
+    assert interrupts, "expected interrupt at confirm_with_user"
+    spec = interrupts[0].value
+    assert "atr" in spec.get("name", "").lower() or "atr" in spec.get("signal_logic", "").lower(), (
+        f"Expected ATR strategy, got name={spec.get('name')}, signal_logic={spec.get('signal_logic')}"
+    )
+
+
+def test_parse_strategy_buy_and_hold_not_ma(requires_llm):
+    """parse_strategy should extract buy and hold, not default to MA crossover."""
+    from src.config.llm_client import LLMClient
+
+    client = LLMClient()
+    subgraph = compile_codegen_subgraph(client)
+
+    result = subgraph.invoke(
+        {
+            "messages": [
+                HumanMessage(
+                    content="Buy and hold SPY using vectorbt with monthly rebalancing"
+                )
+            ],
+            "user_id": "test_user",
+        }
+    )
+    interrupts = result.get("__interrupt__") or []
+    assert interrupts, "expected interrupt at confirm_with_user"
+    spec = interrupts[0].value
+    name_lower = spec.get("name", "").lower()
+    signal_lower = spec.get("signal_logic", "").lower()
+    assert ("buy" in name_lower and "hold" in name_lower) or "hold" in signal_lower, (
+        f"Expected buy-and-hold, got name={spec.get('name')}"
+    )
+    assert "ma(" not in signal_lower and "moving average" not in signal_lower, (
+        f"Should NOT be MA crossover, got signal_logic={spec.get('signal_logic')}"
+    )
+
+
+def test_parse_strategy_dual_ma_gets_correct_params(requires_llm):
+    """When user actually wants MA crossover, params should match."""
+    from src.config.llm_client import LLMClient
+
+    client = LLMClient()
+    subgraph = compile_codegen_subgraph(client)
+
+    result = subgraph.invoke(
+        {
+            "messages": [
+                HumanMessage(content="Dual moving average 20/60 crossover on daily data")
+            ],
+            "user_id": "test_user",
+        }
+    )
+    interrupts = result.get("__interrupt__") or []
+    assert interrupts, "expected interrupt at confirm_with_user"
+    spec = interrupts[0].value
+    params = spec.get("parameters") or {}
+    assert (
+        params.get("ma_fast") == 20
+        or params.get("ma_slow") == 60
+        or params.get("fast_period") == 20
+        or params.get("slow_period") == 60
+    ), f"Expected MA(20,60) params, got {params}"
+
+
+def test_parse_strategy_uses_strong_model():
+    """parse_strategy should pass strong_model to chat_structured."""
+    mock_llm = MagicMock()
+    mock_llm.strong_model = "deepseek-v4-pro"
+    mock_llm.chat_structured.return_value = {
+        "name": "Test Strategy",
+        "description": "test",
+        "framework": "backtrader",
+        "parameters": {},
+        "signal_logic": "test signal",
+        "asset_class": None,
+        "timeframe": None,
+    }
+
+    graph = compile_codegen_subgraph(mock_llm)
+    result = graph.invoke(
+        {
+            "messages": [HumanMessage(content="ATR stop loss strategy")],
+            "user_id": "test_user",
+        }
+    )
+
+    call_kwargs = mock_llm.chat_structured.call_args
+    assert call_kwargs is not None, "chat_structured was not called"
+    assert call_kwargs[1].get("model") == "deepseek-v4-pro", (
+        f"Expected model='deepseek-v4-pro', got {call_kwargs[1].get('model')}"
+    )
+    assert result.get("__interrupt__"), "expected interrupt at confirm_with_user"

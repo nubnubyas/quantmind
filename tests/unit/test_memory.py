@@ -77,3 +77,40 @@ def test_profile_is_dataclass():
     assert profile.target_roles == []
     assert profile.skill_level is None
     assert profile.preferences == {}
+
+
+def test_get_profile_no_langgraph_context_returns_none():
+    """get_profile() should return None (not crash) when no LangGraph runtime."""
+    mem = UserMemory()  # no store injected
+    result = mem.get_profile("test_user_123")
+    assert result is None
+
+
+def test_get_research_plans_no_langgraph_context_returns_empty():
+    """get_research_plans() should return [] (not crash) when no LangGraph runtime."""
+    mem = UserMemory()  # no store injected
+    result = mem.get_research_plans("test_user_123")
+    assert result == []
+
+
+def test_list_bookmarks_no_langgraph_context_returns_empty():
+    """list_bookmarks() should return [] (not crash) when no LangGraph runtime."""
+    mem = UserMemory()  # no store injected
+    result = mem.list_bookmarks("test_user_123")
+    assert result == []
+
+
+def test_update_profile_no_langgraph_context_does_not_crash():
+    """update_profile() should not crash when no LangGraph runtime."""
+    mem = UserMemory()
+    # Should not raise
+    mem.update_profile("test_user_123", {"skill_level": "beginner"})
+
+
+def test_add_and_get_bookmark_no_langgraph_context():
+    """Bookmark CRUD should work with InMemoryStore fallback."""
+    mem = UserMemory()
+    mem.add_bookmark("test_user_123", "paper_001", "Good paper")
+    bookmarks = mem.list_bookmarks("test_user_123")
+    assert len(bookmarks) == 1
+    assert bookmarks[0]["paper_id"] == "paper_001"

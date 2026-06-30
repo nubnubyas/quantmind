@@ -63,9 +63,13 @@ class VectorStore:
         self._host = host or os.getenv("QDRANT_HOST", "localhost")
         self._port = port or int(os.getenv("QDRANT_PORT", "6333"))
         self._embedding_model = embedding_model or os.getenv(
-            "EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5"
+            "EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5"
         )
-        self._embedding_dim = embedding_dim or int(os.getenv("EMBEDDING_DIM", "384"))
+        if embedding_dim is not None:
+            self._embedding_dim = embedding_dim
+        else:
+            probe = TextEmbedding(self._embedding_model)
+            self._embedding_dim = len(list(probe.embed(["test"]))[0])
         self._timeout = timeout
         self._client: QdrantClient | None = None
         self._dense_model: TextEmbedding | None = None

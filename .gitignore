@@ -30,12 +30,34 @@ qdrant_storage/
 checkpoints/
 
 # Internal AI coordination docs (not for public repository)
-memory/
-context/
-templates/
+/memory/
+/context/
+/templates/
 quant-research-agent-proposal.md
 
 # IDE
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code reference (AI assistant metadata, not for public repo)
+CLAUDE.md
+
+# Internal AI coordination (task packages, plans)
+task-packages/
+docs/superpowers/
+
+# Internal dev docs (bug tracker iterations, audit reports, coordinator logs)
+doc/渐进性开发记录.md
+doc/AI协作分工方案.md
+doc/项目审核报告-v1.0.md
+doc/项目审核报告-v2.0.md
+doc/协调者修复报告.md
+doc/AI工程概念讲解.md
+
+# Eval output artifacts (generated at runtime)
+eval_report*.md
+eval_results*.json
+eval_v3.*
+eval_v2.*
+eval_v1.*

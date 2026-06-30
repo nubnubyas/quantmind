@@ -12,14 +12,15 @@ from src.db import (
 )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_db():
+@pytest.fixture(scope="module")
+def setup_db(requires_db):
+    """Create all tables once per module. Skipped when PostgreSQL unreachable."""
     create_all()
     yield
 
 
 @pytest.fixture
-def db_session():
+def db_session(setup_db):
     with get_session() as session:
         yield session
         session.execute(text("DELETE FROM research_notes"))

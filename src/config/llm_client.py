@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
 from dataclasses import dataclass
@@ -79,8 +81,8 @@ class LLMClient:
         _load_env()
         self._api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
         self._base_url = base_url or os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-        self._default_model = default_model or os.getenv("LLM_FAST", "deepseek-chat")
-        self._strong_model = os.getenv("LLM_STRONG", "deepseek-reasoner")
+        self._default_model = default_model or os.getenv("LLM_FAST", "deepseek-v4-flash")
+        self._strong_model = os.getenv("LLM_STRONG", "deepseek-v4-pro")
         self._verify_fail_once = verify_fail_once
         self._verify_failed = False
 
@@ -125,8 +127,6 @@ class LLMClient:
                     "failure_reasons": ["simulated first verification failure for retry demo"],
                 }
 
-        import json
-
         if isinstance(schema, type) and issubclass(schema, BaseModel):
             schema_hint = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         else:
@@ -144,7 +144,30 @@ class LLMClient:
         llm_json = self._chat_model(model, model_kwargs={"response_format": {"type": "json_object"}})
         response = llm_json.invoke(_to_lc_messages(json_messages))
         content = response.content if isinstance(response.content, str) else str(response.content)
-        return json.loads(content)
+        data = json.loads(content)
+
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            try:
+                validated = schema.model_validate(data)
+                data = validated.model_dump()
+            except Exception as e:
+                defaults_filled = {}
+                for field_name, field_info in schema.model_fields.items():
+                    if field_name not in data:
+                        if field_info.default is not None and field_info.default is not ...:
+                            defaults_filled[field_name] = field_info.default
+                        elif field_info.default_factory is not None:
+                            defaults_filled[field_name] = field_info.default_factory()
+                data.update(defaults_filled)
+                if defaults_filled:
+                    logging.warning(
+                        "chat_structured: filled missing fields %s for %s (LLM omitted them). "
+                        "Validation error: %s",
+                        list(defaults_filled.keys()),
+                        schema.__name__,
+                        e,
+                    )
+        return data
 
     def chat_stream(self, messages: list[dict], model: str | None = None) -> Iterator[str]:
         llm = self._chat_model(model)
@@ -167,13 +190,19 @@ class EmbeddingClient:
         dim: int | None = None,
     ) -> None:
         _load_env()
-        self.model = model or os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-        self.dim = dim or int(os.getenv("EMBEDDING_DIM", "384"))
+        self.model = model or os.getenv("EMBEDDING_MODEL", "BAAI/bge-base-en-v1.5")
         if TextEmbedding is None:
             raise ImportError("fastembed is required for EmbeddingClient")
         self._embedder = TextEmbedding(model_name=self.model)
+        if dim is not None:
+            self.dim = dim
+        else:
+            test_vec = list(self._embedder.embed(["test"]))[0]
+            self.dim = len(test_vec)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
         return [vec.tolist() for vec in self._embedder.embed(texts)]
 
 

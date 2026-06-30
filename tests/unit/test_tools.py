@@ -26,14 +26,15 @@ from src.vector_store.mock_vector_store import MockVectorStore
 from src.vector_store.types import RetrievalSpec, SearchResult
 
 
-@pytest.fixture(scope="module", autouse=True)
-def setup_db():
+@pytest.fixture(scope="module")
+def setup_db(requires_db):
+    """Create all tables once per module. Skipped when PostgreSQL unreachable."""
     create_all()
     yield
 
 
 @pytest.fixture
-def db_session():
+def db_session(setup_db):
     with get_session() as session:
         yield session
         session.execute(text("DELETE FROM research_notes"))
@@ -117,7 +118,7 @@ def test_generate_backtest_code():
     mock_llm = MagicMock()
     mock_llm.chat.return_value = LLMResult(
         text="import backtrader as bt\n\nclass MyStrategy(bt.Strategy):\n    pass",
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
         usage={"input_tokens": 10, "output_tokens": 50, "total_tokens": 60},
         latency_ms=1200,
     )
@@ -152,7 +153,7 @@ def test_explain_concept():
     mock_llm = MagicMock()
     mock_llm.chat.return_value = LLMResult(
         text="The Sharpe ratio is a risk-adjusted performance metric.",
-        model="deepseek-chat",
+        model="deepseek-v4-flash",
         usage={},
         latency_ms=500,
     )

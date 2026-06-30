@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -25,6 +26,7 @@ os.environ.setdefault(
 from src.agents.research_agent import compile_research_subgraph
 from src.agents.state import _merge_retry_counts
 from src.config.llm_client import create_llm_client
+from src.tools.types import ToolResult
 from src.vector_store.mock_vector_store import MockVectorStore
 from src.vector_store.qdrant_client_wrapper import VectorStore
 
@@ -101,10 +103,16 @@ def test_happy_path() -> None:
 
 def test_graceful_decline() -> None:
     print(DIVIDER + "Graceful decline: low confidence mock")
-    graph = compile_research_subgraph(
-        MockVectorStore(low_confidence=True), create_llm_client()
+    empty_web = ToolResult(
+        ok=True,
+        tool_name="search_web",
+        data={"result_type": "web_search_results", "results": [], "count": 0},
     )
-    result = graph.invoke(_initial_state("demo_user", "解释 Fama-French 三因子模型"))
+    with patch("src.agents.research_agent.search_web", return_value=empty_web):
+        graph = compile_research_subgraph(
+            MockVectorStore(low_confidence=True), create_llm_client()
+        )
+        result = graph.invoke(_initial_state("demo_user", "解释 Fama-French 三因子模型"))
     final = result.get("final_response") or ""
     subgraph = (result.get("subgraph_outputs") or {}).get("research", {})
     assert subgraph.get("error") == "low_confidence", subgraph
